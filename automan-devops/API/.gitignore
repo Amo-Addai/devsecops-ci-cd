@@ -1,0 +1,4 @@
+
+# Ignore build and test artifacts
+target
+reports
