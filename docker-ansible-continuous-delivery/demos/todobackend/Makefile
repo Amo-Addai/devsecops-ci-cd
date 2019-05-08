@@ -135,6 +135,7 @@ clean:
 	@ docker-compose -p $(REL_PROJECT) -f $(REL_COMPOSE_FILE) rm -f -v
 	${INFO} "Removing dangling images..."
 	@ docker images -q -f dangling=true -f label=application=$(REPO_NAME) | xargs -I ARGS docker rmi -f ARGS
+	# @ docker rmi $( docker images -q -f dangline=true ) # THIS WILL ALSO WORK THE SAME WAY (REMOVing DANGLING IMAGES)
 	${INFO} "Clean complete"
 
 tag: 
