@@ -1,33 +1,33 @@
 # todo: terraform init - setup terraform in current directory 
 
 provider "aws" { // "provider" name
-    version = "~> 2.0"
-    region  = "us-east-1"
+  version = "~> 2.0"
+  region  = "us-east-1"
 }
 
 resource "aws_vpc" "example" { // "provider_resource" "variable"
-    cidr_block  = "10.0.0.0/16" // IPv4 CIDR Block of 
+  cidr_block = "10.0.0.0/16"   // IPv4 CIDR Block of 
 }
 
 provider "kubernetes" {
-    config_context_auth_info    = "ops"
-    config_context_cluster      = "mycluster"
+  config_context_auth_info = "ops"
+  config_context_cluster   = "mycluster"
 }
 
 resource "kubernetes_namespace" "example" {
-    metadata {
-        name    = "sample-namespace"
-    }
+  metadata {
+    name = "sample-namespace"
+  }
 }
 
 data "aws_vpc" "resource_name" { // query "provider_resource" for "resource_name" data
-    default = true
+  default = true
 }
 
 resource "aws_subnet" "new_resource_name" {
-    vpc_id              = data.aws_vpc.resource_name.id // get .id property of resource_name data from aws_vpc
-    cidr_block          = "172.31.48.0/20" // use sub-set IP from CIDR Block of existing resource_name
-    availability_zone   = "eu-west-3a"
+  vpc_id            = data.aws_vpc.resource_name.id // get .id property of resource_name data from aws_vpc
+  cidr_block        = "172.31.48.0/20"              // use sub-set IP from CIDR Block of existing resource_name
+  availability_zone = "eu-west-3a"
 }
 
 # todo: terraform apply - execute config.tf files; auto-gen's terraform.tfstate (json file with current state)
@@ -64,15 +64,36 @@ resource "aws_subnet" "dev-subnet-2" {
 }
 
 # todo: terrform destroy - removes all config'd resources
+
 # OR: terraform destroy -target provider_resource.resource_name
 # eg: terraform destroy -target aws_subnet.dev-subnet-2
 
-# todo: it's best to remove resources, then terraform apply, so that .tf config files will correspond to the current state of cloud resources
+# it's best to remove resources, then terraform apply, so that .tf config files will correspond to the current state of cloud resources
 # using terraform detroy -target alone will still leave .tf config files inconsistent with the destroyed cloud resources in its current state
 
 */
 
-# todo: terraform plan - preview list to actions to be executed to reach desired cloud state
+# todo: 
 
-# todo: terraform apply -auto-approve - to auto-respond to t-apply's confirmation question
+/*
+
+terraform plan - preview list to actions to be executed to reach desired cloud state
+
+terraform apply -auto-approve - to auto-respond to t-apply's confirmation question
+
+terraform state - show the current state
+
+*/
+
+output "attribute_name" {
+  value = provider_resource.resource_name.attr // attr ~ id
+}
+
+/* # TODO: find out how to output multple values this way
+output "ids" {
+  vpc-id      = aws_vpc.dev-vpc.id
+  subnet-1-id = aws_subnet.dev-subnet-1.id
+  subnet-2-id = aws_subnet.dev-subnet-2.id
+}
+*/
 
