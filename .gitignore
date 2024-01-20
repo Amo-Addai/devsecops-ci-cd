@@ -1,2 +1,4 @@
+.env
+
 samples.tf
 extra.tf

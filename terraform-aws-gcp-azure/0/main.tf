@@ -4,21 +4,17 @@ provider "aws" {
   secret_key = "SECRET_KEY"
 }
 
-variable "subnet_cidr_block" {
-  description = "subnet cidr block"
-}
-
 resource "aws_vpc" "dev-vpc" {
   cidr_block = "10.0.0.0/16"
   tags = {
     Name : "development",
-    vpc_enf : "dev"
+    vpc_env : "dev"
   }
 }
 
 resource "aws_subnet" "dev-subnet-1" {
   vpc_id            = aws_vpc.dev-vpc.id
-  cidr_block        = var.subnet_cidr_block
+  cidr_block        = "10.0.10.0/24"
   availability_zone = "eu-west-3a"
   tags = {
     Name : "subnet-1-dev"
