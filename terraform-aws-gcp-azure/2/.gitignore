@@ -1,6 +1,4 @@
 .env
-samples.tf
-extra.tf
 
 # local .terraform dir
 .terraform/*
