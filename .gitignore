@@ -1,4 +1,6 @@
 .env
+.DS_Store
+
 samples.tf
 extra.tf
 
