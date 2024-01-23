@@ -5,7 +5,7 @@ samples.tf
 extra.tf
 
 # local .terraform dir
-.terraform/*
+**/.terraform/*
 
 # tf state files
 *.tfstate
@@ -13,3 +13,7 @@ extra.tf
 
 # tf variable files, may include sensitive data
 *.tfvars
+
+# cli configuration files
+.terraformrc
+terraform.rc
