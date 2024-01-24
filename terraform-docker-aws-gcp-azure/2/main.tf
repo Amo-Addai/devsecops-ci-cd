@@ -2,14 +2,14 @@ provider "aws" {
   region = "eu-west-3"
 }
 
-variable availability_zone {}
-variable env {}
-variable vpc_cidr_block {}
-variable subnet_cidr_block {}
-variable allowed_ips {}
-variable all_ips {}
-variable instance_type {}
-variable public_key_location {}
+variable "availability_zone" {}
+variable "env" {}
+variable "vpc_cidr_block" {}
+variable "subnet_cidr_block" {}
+variable "allowed_ips" {}
+variable "all_ips" {}
+variable "instance_type" {}
+variable "public_key_location" {}
 
 resource "aws_vpc" "app-vpc" {
   cidr_block = var.vpc_cidr_block
@@ -127,7 +127,7 @@ data "aws_ami" "amazon-linux-image-latest" {
   }
 }
 
-output "aws_ami" { // output first, to cross-check the image info, specifically its id
+output "aws_ami" {
   value = data.aws_ami.amazon-linux-image-latest
 }
 
@@ -135,12 +135,8 @@ output "aws_ami_id" {
   value = data.aws_ami.amazon-linux-image-latest.id
 }
 
-output "ec2_public_ip" {
-  value = aws_instance.app-server.public_ip
-}
-
 resource "aws_key_pair" "ssh-key" {
-  key_name = "server-key"
+  key_name   = "server-key"
   public_key = file(var.public_key_location)
 }
 
@@ -151,9 +147,15 @@ resource "aws_instance" "app-server" {
   vpc_security_group_ids      = [aws_default_security_group.app-sg-default.id]
   availability_zone           = var.availability_zone
   associate_public_ip_address = true
-  key_name                    = "server-key-pair" // name of ssh key-pair in aws
+  key_name                    = aws_key_pair.ssh-key.key_name
+  
+  user_data = file("entrypoint.sh")
+
   tags = {
-    Name : "${var.env}-server"
+    Name = "${var.env}-server"
   }
 }
 
+output "ec2_public_ip" {
+  value = aws_instance.app-server.public_ip
+}
