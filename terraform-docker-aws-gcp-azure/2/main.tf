@@ -9,6 +9,7 @@ variable subnet_cidr_block {}
 variable allowed_ips {}
 variable all_ips {}
 variable instance_type {}
+variable public_key_location {}
 
 resource "aws_vpc" "app-vpc" {
   cidr_block = var.vpc_cidr_block
@@ -126,15 +127,33 @@ data "aws_ami" "amazon-linux-image-latest" {
   }
 }
 
-/*
 output "aws_ami" { // output first, to cross-check the image info, specifically its id
   value = data.aws_ami.amazon-linux-image-latest
 }
-*/
+
+output "aws_ami_id" {
+  value = data.aws_ami.amazon-linux-image-latest.id
+}
+
+output "ec2_public_ip" {
+  value = aws_instance.app-server.public_ip
+}
+
+resource "aws_key_pair" "ssh-key" {
+  key_name = "server-key"
+  public_key = file(var.public_key_location)
+}
 
 resource "aws_instance" "app-server" {
-  ami           = data.aws_ami.amazon-linux-image-latest.id
-  instance_type = var.instance_type
-   
+  ami                         = data.aws_ami.amazon-linux-image-latest.id
+  instance_type               = var.instance_type
+  subnet_id                   = aws_subnet.app-subnet-1.id
+  vpc_security_group_ids      = [aws_default_security_group.app-sg-default.id]
+  availability_zone           = var.availability_zone
+  associate_public_ip_address = true
+  key_name                    = "server-key-pair" // name of ssh key-pair in aws
+  tags = {
+    Name : "${var.env}-server"
+  }
 }
 

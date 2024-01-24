@@ -1,19 +1,2 @@
 .env
 .DS_Store
-
-samples.tf
-extra.tf
-
-# local .terraform dir
-**/.terraform/*
-
-# tf state files
-*.tfstate
-*.tfstate.*
-
-# tf variable files, may include sensitive data
-*.tfvars
-
-# cli configuration files
-.terraformrc
-terraform.rc
