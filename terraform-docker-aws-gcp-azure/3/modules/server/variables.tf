@@ -1,0 +1,10 @@
+variable "availability_zone" {}
+variable "env" {}
+variable "allowed_ips" {}
+variable "all_ips" {}
+variable "instance_type" {}
+variable "public_key_location" {}
+variable "private_key_location" {}
+variable "vpc_id" {}
+variable "subnet_id" {}
+variable "image_name" {}
