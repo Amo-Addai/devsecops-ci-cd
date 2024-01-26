@@ -10,6 +10,7 @@ variable "allowed_ips" {}
 variable "all_ips" {}
 variable "instance_type" {}
 variable "public_key_location" {}
+variable "private_key_location" {}
 
 resource "aws_vpc" "app-vpc" {
   cidr_block = var.vpc_cidr_block
@@ -148,11 +149,31 @@ resource "aws_instance" "app-server" {
   availability_zone           = var.availability_zone
   associate_public_ip_address = true
   key_name                    = aws_key_pair.ssh-key.key_name
-  
+
   user_data = file("entrypoint.sh")
 
   tags = {
     Name = "${var.env}-server"
+  }
+
+  provisioner "file" {
+    source      = "entrypoint.sh"
+    destination = "/path/to/entrypoint.sh"
+  }
+
+  provisioner "local-exec" {
+    command = "echo ${self.public_ip} > output.txt"
+  }
+
+  provisioner "remote-exec" {
+    script = file("entrypoint.sh")
+  }
+
+  connection {
+    type        = "ssh"
+    host        = self.public_ip
+    user        = "ec2-user"
+    private_key = file(var.private_key_location)
   }
 }
 
