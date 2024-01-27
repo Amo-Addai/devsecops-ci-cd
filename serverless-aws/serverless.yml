@@ -1,0 +1,755 @@
+service: chatbot-api-service
+
+frameworkVersion: ">=1.28.0 <=2.21.1"
+useDotenv: true
+
+custom:
+  stage: ${opt:stage, self:provider.stage}
+  region: ${opt:region, self:provider.region}
+  newMessageTopic: "new-message-topic-${self:custom.stage}"
+  newMessageOutTopic: "new-message-out-topic-${self:custom.stage}"
+  botRequestQueue: "bot-request-queue-${self:custom.stage}"
+  pusherMessageRequestQueue: "pusher-message-request-queue-${self:custom.stage}"
+  pusherConversationRequestQueue: "pusher-conversation-request-queue-${self:custom.stage}"
+  notifyUsersQueue: "notify-users-queue-${self:custom.stage}"
+  userPool: "user-pool-${self:custom.stage}"
+  userPoolClient: "user-pool-client-${self:custom.stage}"
+  authorizer: "authorizer-${self:custom.stage}"
+  identityPool: "identity-pool-${self:custom.stage}"
+  userPoolDomain: "chatbot-user-pool-domain-${self:custom.stage}"
+  pusherAppId: ${param:PUSHER_APP_ID, env:PUSHER_APP_ID}
+  pusherKey: ${param:PUSHER_KEY, env:PUSHER_KEY}
+  pusherSecret: ${param:PUSHER_SECRET, env:PUSHER_SECRET}
+  pusherCluster: ${param:PUSHER_CLUSTER, env:PUSHER_CLUSTER}
+  TWILIO_AUTH_TOKEN: ${param:TWILIO_AUTH_TOKEN, env:TWILIO_AUTH_TOKEN}
+  TWILIO_ACCOUNT_SID: ${param:TWILIO_ACCOUNT_SID, env:TWILIO_ACCOUNT_SID}
+  superUserPhones: ${param:SUPERUSER_PHONES, env:SUPERUSER_PHONES}
+  fromPhone: ${param:FROM_PHONE, env:FROM_PHONE}
+
+provider:
+  name: aws
+  runtime: go1.x
+  versionFunctions: false
+  region: ${self:custom.region}
+  lambdaHashingVersion: '20201221'
+  apiGateway:
+    shouldStartNameWithService: true
+  environment:
+    CONVERSATIONS_TABLE: "conversations-${self:custom.stage}"
+    MESSAGES_TABLE: "messages-${self:custom.stage}"
+    NOTIFIES_TABLE: "notifies-${self:custom.stage}"
+    COMPANIES_TABLE: "companies-${self:custom.stage}"
+    DEBUG: 'true'
+    TWILIO_AUTH_TOKEN: ${self:custom.TWILIO_AUTH_TOKEN}
+    TWILIO_ACCOUNT_SID: ${self:custom.TWILIO_ACCOUNT_SID}
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:DescribeTable
+        - dynamodb:UpdateTable
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+        - sns:Publish
+        - lambda:CreateEventSourceMapping
+        - lambda:ListEventSourceMappings
+        - lambda:ListFunctions
+        - sqs:SendMessage
+        - sqs:DeleteMessage
+        - sqs:GetQueueAttributes
+        - sqs:ReceiveMessage
+        - s3:ListAllMyBuckets
+        - s3:ListBucket
+        - s3:GetObject
+        - s3:GetObjectVersion
+        - s3:PutBucketTagging
+        - s3:CreateBucket
+        - s3:DeleteBucket
+        - s3:DeleteObject
+        - s3:DeleteObjectVersion
+        - s3:PutBucketNotification
+        - s3:PutBucketWebsite
+        - s3:PutObject
+        - cognito-idp:CreateUserPool
+        - cognito-idp:DeleteUserPool
+        - cognito-idp:UpdateUserPool
+        - cognito-idp:CreateUserPoolDomain
+        - cognito-idp:DeleteUserPoolDomain
+        - cognito-idp:UpdateUserPoolDomain
+        - cognito-idp:CreateUserPoolClient
+        - cognito-idp:DeleteUserPoolClient
+        - cognito-idp:UpdateUserPoolClient
+        - cognito-idp:ListTagsForResource
+        - cognito-idp:ListUsersInGroup
+        - cognito-identity:CreateIdentityPool
+        - cognito-identity:DeleteIdentityPool
+        - cognito-identity:UpdateIdentityPool
+        - cognito-identity:DescribeIdentityPool
+        - cognito-identity:GetCredentialsForIdentity
+        - cognito-identity:GetId
+        - cognito-identity:SetIdentityPoolRoles
+      Resource: "*"
+
+functions:
+
+  # Twilio webhook, convert to new chat message
+  new_sms:
+    handler: bin/new_sms
+    events:
+      - http:
+          path: new_sms
+          method: post
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      TWILIO_AUTH_TOKEN: ${self:provider.environment.TWILIO_AUTH_TOKEN}
+      TWILIO_ACCOUNT_SID: ${self:provider.environment.TWILIO_ACCOUNT_SID}
+      THIS_URL: { "Fn::Join" : ["", ["https://", { "Ref" : "ApiGatewayRestApi" }, ".execute-api.us-east-1.amazonaws.com/${self:custom.stage}/new_sms" ] ]  }
+      TOPIC_URL: { "Fn::Join" : ["", ["arn:aws:sns:${self:custom.region}:", { "Ref" : "AWS::AccountId" }, ":${self:custom.newMessageTopic}" ] ]  }
+
+  # Create conversation, typically organization
+  create_conversation:
+    handler: bin/create_conversation
+    events:
+      - http:
+          path: conversations
+          method: post
+          cors: true
+          authorizer:
+            name: ${self:custom.authorizer}
+            type: COGNITO_USER_POOLS
+            arn:
+              Fn::GetAtt:
+                - CognitoUserPool
+                - Arn
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      COMPANIES_TABLENAME: ${self:provider.environment.COMPANIES_TABLE}
+      BOT_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.botRequestQueue}" ] ]  }
+      NOTIFY_USERS_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.notifyUsersQueue}" ] ]  }
+      PUSHER_MESSAGE_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.pusherMessageRequestQueue}" ] ]  }
+      PUSHER_CONVERSATION_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.pusherConversationRequestQueue}" ] ]  }
+      NEW_MESSAGE_OUT_TOPIC_URL: { "Fn::Join" : ["", ["arn:aws:sns:${self:custom.region}:", { "Ref" : "AWS::AccountId" }, ":${self:custom.newMessageOutTopic}" ] ]  }
+
+  # Edit company
+  edit_company:
+    handler: bin/edit_company
+    events:
+      - http:
+          path: company/{company_id}
+          method: put
+          cors: true
+          request:
+            parameters:
+              paths:
+                conversation_id: true
+          authorizer:
+            name: ${self:custom.authorizer}
+            type: COGNITO_USER_POOLS
+            arn:
+              Fn::GetAtt:
+                - CognitoUserPool
+                - Arn
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      COMPANIES_TABLENAME: ${self:provider.environment.COMPANIES_TABLE}
+      REGION: ${self:custom.region}
+
+  # Get Company that the user is part of
+  get_companies:
+    handler: bin/get_companies
+    events:
+      - http:
+          path: companies
+          method: get
+          cors: true
+          authorizer:
+            name: ${self:custom.authorizer}
+            type: COGNITO_USER_POOLS
+            arn:
+              Fn::GetAtt:
+                - CognitoUserPool
+                - Arn
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      REGION: ${self:custom.region}
+      COMPANIES_TABLENAME: ${self:provider.environment.COMPANIES_TABLE}
+
+  # Pusher Auth
+  websocket_auth:
+    handler: bin/websocket_auth
+    events:
+      - http:
+          path: pusher/auth
+          method: post
+          cors: true
+          authorizer:
+            name: ${self:custom.authorizer}
+            type: COGNITO_USER_POOLS
+            arn:
+              Fn::GetAtt:
+                - CognitoUserPool
+                - Arn
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      REGION: ${self:custom.region}
+      PUSHER_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.pusherMessageRequestQueue}" ] ]  }
+      PUSHER_APP_ID: ${self:custom.pusherAppId}
+      PUSHER_KEY: ${self:custom.pusherKey}
+      PUSHER_SECRET: ${self:custom.pusherSecret}
+      PUSHER_CLUSTER: ${self:custom.pusherCluster}
+
+  # Sends conversation to UI via pusher
+  conversation_feed:
+    handler: bin/conversation_feed
+    events:
+      - sqs:
+          arn:
+            Fn::Join:
+              - ':'
+              - - arn
+                - aws
+                - sqs
+                - Ref: AWS::Region
+                - Ref: AWS::AccountId
+                - ${self:custom.pusherConversationRequestQueue}
+          batchSize: 1
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      REGION: ${self:custom.region}
+      PUSHER_APP_ID: ${self:custom.pusherAppId}
+      PUSHER_KEY: ${self:custom.pusherKey}
+      PUSHER_SECRET: ${self:custom.pusherSecret}
+      PUSHER_CLUSTER: ${self:custom.pusherCluster}
+      PUSHER_EVENT_NAME: 'new_conversation_feed'
+      COGNITO_ID:
+        Ref: CognitoUserPool
+
+  # Sends messages to UI via pusher
+  message_feed:
+    handler: bin/message_feed
+    events:
+      - sqs:
+          arn:
+            Fn::Join:
+              - ':'
+              - - arn
+                - aws
+                - sqs
+                - Ref: AWS::Region
+                - Ref: AWS::AccountId
+                - ${self:custom.pusherMessageRequestQueue}
+          batchSize: 1
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      REGION: ${self:custom.region}
+      PUSHER_APP_ID: ${self:custom.pusherAppId}
+      PUSHER_KEY: ${self:custom.pusherKey}
+      PUSHER_SECRET: ${self:custom.pusherSecret}
+      PUSHER_CLUSTER: ${self:custom.pusherCluster}
+      PUSHER_EVENT_NAME: 'new_message_feed'
+      COGNITO_ID:
+        Ref: CognitoUserPool
+
+  # Save message
+  create_message:
+    handler: bin/create_message
+    events:
+      - http:
+          path: messages/{conversation_id}
+          method: post
+          cors: true
+          request:
+            parameters:
+              paths:
+                conversation_id: true
+          authorizer:
+            name: ${self:custom.authorizer}
+            type: COGNITO_USER_POOLS
+            arn:
+              Fn::GetAtt:
+                - CognitoUserPool
+                - Arn
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      REGION: ${self:custom.region}
+      TOPIC_URL: { "Fn::Join" : ["", ["arn:aws:sns:${self:custom.region}:", { "Ref" : "AWS::AccountId" }, ":${self:custom.newMessageOutTopic}" ] ]  }
+      PUSHER_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.pusherMessageRequestQueue}" ] ]  }
+
+  # Edit conversation
+  edit_conversation:
+    handler: bin/edit_conversation
+    events:
+      - http:
+          path: conversations/{conversation_id}
+          method: put
+          cors: true
+          request:
+            parameters:
+              paths:
+                conversation_id: true
+          authorizer:
+            name: ${self:custom.authorizer}
+            type: COGNITO_USER_POOLS
+            arn:
+              Fn::GetAtt:
+                - CognitoUserPool
+                - Arn
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      REGION: ${self:custom.region}
+      TOPIC_URL: { "Fn::Join" : ["", ["arn:aws:sns:${self:custom.region}:", { "Ref" : "AWS::AccountId" }, ":${self:custom.newMessageOutTopic}" ] ]  }
+      PUSHER_CONVERSATION_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.pusherConversationRequestQueue}" ] ]  }
+
+  # Get messages
+  get_messages:
+    handler: bin/get_messages
+    events:
+      - http:
+          path: messages/{conversation_id}
+          method: get
+          cors: true
+          request:
+            parameters:
+              paths:
+                conversation_id: true
+          authorizer:
+            name: ${self:custom.authorizer}
+            type: COGNITO_USER_POOLS
+            arn:
+              Fn::GetAtt:
+                - CognitoUserPool
+                - Arn
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      REGION: ${self:custom.region}
+
+  # Get conversations
+  get_conversations:
+    handler: bin/get_conversations
+    events:
+      - http:
+          path: conversations
+          method: get
+          cors: true
+          request:
+            parameters:
+              querystrings:
+                since: false
+          authorizer:
+            name: ${self:custom.authorizer}
+            type: COGNITO_USER_POOLS
+            arn:
+              Fn::GetAtt:
+                - CognitoUserPool
+                - Arn
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      REGION: ${self:custom.region}
+
+  # Message back to user
+  new_message_out:
+    handler: bin/new_message_out
+    events:
+      - sns:
+          arn: !Ref NewMessageOutTopic
+          topicName: ${self:custom.newMessageOutTopic}
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      TWILIO_AUTH_TOKEN: ${self:provider.environment.TWILIO_AUTH_TOKEN}
+      TWILIO_ACCOUNT_SID: ${self:provider.environment.TWILIO_ACCOUNT_SID}
+
+  # Call bot
+  bot_request:
+    handler: bin/bot_request
+    events:
+      - sqs:
+          arn:
+            Fn::Join:
+              - ':'
+              - - arn
+                - aws
+                - sqs
+                - Ref: AWS::Region
+                - Ref: AWS::AccountId
+                - ${self:custom.botRequestQueue}
+          batchSize: 1
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      COMPANIES_TABLENAME: ${self:provider.environment.COMPANIES_TABLE}
+      REGION: ${self:custom.region}
+      NEW_MESSAGE_OUT_TOPIC_URL: { "Fn::Join" : ["", ["arn:aws:sns:${self:custom.region}:", { "Ref" : "AWS::AccountId" }, ":${self:custom.newMessageOutTopic}" ] ]  }
+      PUSHER_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.pusherMessageRequestQueue}" ] ]  }
+      BOOST_URL: 'https://its-hospitality.boost.ai'
+
+  # Process new chat message from guest
+  new_message:
+    handler: bin/new_message
+    events:
+      - sns:
+          arn: !Ref NewMessageTopic
+          topicName: ${self:custom.newMessageTopic}
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      MESSAGES_TABLENAME: ${self:provider.environment.MESSAGES_TABLE}
+      COMPANIES_TABLENAME: ${self:provider.environment.COMPANIES_TABLE}
+      BOT_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.botRequestQueue}" ] ]  }
+      NOTIFY_USERS_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.notifyUsersQueue}" ] ]  }
+      PUSHER_MESSAGE_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.pusherMessageRequestQueue}" ] ]  }
+      PUSHER_CONVERSATION_REQUEST_QUEUE_URL: { "Fn::Join" : ["", ["https://sqs.us-east-1.amazonaws.com/", { "Ref" : "AWS::AccountId" }, "/${self:custom.pusherConversationRequestQueue}" ] ]  }
+      NEW_MESSAGE_OUT_TOPIC_URL: { "Fn::Join" : ["", ["arn:aws:sns:${self:custom.region}:", { "Ref" : "AWS::AccountId" }, ":${self:custom.newMessageOutTopic}" ] ]  }
+      REGION: ${self:custom.region}
+
+  # alert superusers that a new user message has come in
+  notify_superusers:
+    handler: bin/notify_superusers
+    events:
+      - sqs:
+          arn:
+            Fn::Join:
+              - ':'
+              - - arn
+                - aws
+                - sqs
+                - Ref: AWS::Region
+                - Ref: AWS::AccountId
+                - ${self:custom.notifyUsersQueue}
+          batchSize: 1
+    environment:
+      DEBUG: ${self:provider.environment.DEBUG}
+      CONVERSATIONS_TABLENAME: ${self:provider.environment.CONVERSATIONS_TABLE}
+      NOTIFIES_TABLENAME: ${self:provider.environment.NOTIFIES_TABLE}
+      REGION: ${self:custom.region}
+      TWILIO_AUTH_TOKEN: ${self:provider.environment.TWILIO_AUTH_TOKEN}
+      TWILIO_ACCOUNT_SID: ${self:provider.environment.TWILIO_ACCOUNT_SID}
+      SUPERUSER_PHONES: ${self:custom.superUserPhones}
+      FROM_PHONE: ${self:custom.fromPhone}
+
+resources:
+  Resources:
+    CompaniesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: phone
+            AttributeType: S
+          - AttributeName: name
+            AttributeType: S
+          - AttributeName: company_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: phone
+            KeyType: HASH
+          - AttributeName: name
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: company_id_index
+            KeySchema:
+            - AttributeName: company_id
+              KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+          - IndexName: company_phone_index
+            KeySchema:
+            - AttributeName: phone
+              KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        TableName: ${self:provider.environment.COMPANIES_TABLE}
+    ConversationsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: phone_guest
+            AttributeType: S
+          - AttributeName: phone_dest
+            AttributeType: S
+          - AttributeName: conversation_id
+            AttributeType: S
+          - AttributeName: last_message_created_at
+            AttributeType: S
+        KeySchema:
+          - AttributeName: phone_guest
+            KeyType: HASH
+          - AttributeName: phone_dest
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: conversation_id_index
+            KeySchema:
+            - AttributeName: conversation_id
+              KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+          - IndexName: conversation_timestamp_index
+            KeySchema:
+            - AttributeName: phone_dest
+              KeyType: HASH
+            - AttributeName: last_message_created_at
+              KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        TableName: ${self:provider.environment.CONVERSATIONS_TABLE}
+    MessagesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: conversation_id
+            AttributeType: S
+          - AttributeName: created_at
+            AttributeType: S
+        KeySchema:
+          - AttributeName: conversation_id
+            KeyType: HASH
+          - AttributeName: created_at
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: conversation_id_index
+            KeySchema:
+            - AttributeName: conversation_id
+              KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.MESSAGES_TABLE}
+    NotifiesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: company_id
+            AttributeType: S
+          - AttributeName: phone_admin
+            AttributeType: S
+        KeySchema:
+          - AttributeName: company_id
+            KeyType: HASH
+          - AttributeName: phone_admin
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: company_id_index
+            KeySchema:
+            - AttributeName: company_id
+              KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.NOTIFIES_TABLE}
+    NewMessageTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:custom.newMessageTopic}
+    BotRequestQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:custom.botRequestQueue}
+    PusherMessageRequestQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:custom.pusherMessageRequestQueue}
+    PusherConversationRequestQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:custom.pusherConversationRequestQueue}
+    NotifyUsersQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:custom.notifyUsersQueue}
+    NewMessageOutTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:custom.newMessageOutTopic}
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        # Generate a name based on the stage
+        UserPoolName: ${self:custom.userPool}
+        # Set email as an alias
+        UsernameAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireLowercase: True
+            RequireNumbers: True
+            RequireSymbols: False
+            RequireUppercase: True
+    ApiGatewayAuthorizer:
+      DependsOn:
+        - ApiGatewayRestApi
+      Type: AWS::ApiGateway::Authorizer
+      Properties:
+        Name: cognito-authorizer
+        IdentitySource: method.request.header.Authorization
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        Type: COGNITO_USER_POOLS
+        ProviderARNs:
+          - Fn::GetAtt: [CognitoUserPool, Arn]
+    GatewayResponseDefault4XX:
+      Type: 'AWS::ApiGateway::GatewayResponse'
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: 'ApiGatewayRestApi'
+    GatewayResponseDefault5XX:
+      Type: 'AWS::ApiGateway::GatewayResponse'
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseType: DEFAULT_5XX
+        RestApiId:
+          Ref: 'ApiGatewayRestApi'
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        # Generate an app client name based on the stage
+        ClientName: ${self:custom.userPoolClient}
+        AllowedOAuthFlows:
+          - implicit
+        AllowedOAuthFlowsUserPoolClient: true
+        AllowedOAuthScopes:
+          - phone
+          - email
+          - openid
+          - profile
+          - aws.cognito.signin.user.admin
+        UserPoolId:
+          Ref: CognitoUserPool
+        CallbackURLs:
+          - https://d15uh3illm9e5d.cloudfront.net
+        ExplicitAuthFlows:
+          - ALLOW_USER_SRP_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+        GenerateSecret: false
+        SupportedIdentityProviders:
+          - COGNITO
+    CognitoIdentityPool:
+      Type: AWS::Cognito::IdentityPool
+      Properties:
+        # Generate a name based on the stage
+        IdentityPoolName: ${self:custom.identityPool}
+        # Don't allow unathenticated users
+        AllowUnauthenticatedIdentities: false
+        # Link to our User Pool
+        CognitoIdentityProviders:
+          - ClientId:
+              Ref: CognitoUserPoolClient
+            ProviderName:
+              Fn::GetAtt: [ "CognitoUserPool", "ProviderName" ]
+    CognitoIdentityPoolRoles:
+      Type: AWS::Cognito::IdentityPoolRoleAttachment
+      Properties:
+        IdentityPoolId:
+          Ref: CognitoIdentityPool
+        Roles:
+          authenticated:
+            Fn::GetAtt: [CognitoAuthRole, Arn]
+    CognitoAuthRole:
+      Type: AWS::IAM::Role
+      Properties:
+        Path: /
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: 'Allow'
+              Principal:
+                Federated: 'cognito-identity.amazonaws.com'
+              Action:
+                - 'sts:AssumeRoleWithWebIdentity'
+              Condition:
+                StringEquals:
+                  'cognito-identity.amazonaws.com:aud':
+                    Ref: CognitoIdentityPool
+                'ForAnyValue:StringLike':
+                  'cognito-identity.amazonaws.com:amr': authenticated
+        Policies:
+          - PolicyName: 'CognitoAuthorizedPolicy'
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                # Allow cognito
+                - Effect: 'Allow'
+                  Action:
+                    - 'cognito-sync:*'
+                    - 'cognito-identity:*'
+                  Resource: '*'
+                # Allow users to invoke our API
+                - Effect: 'Allow'
+                  Action:
+                    - 'execute-api:Invoke'
+                  Resource:
+                    Fn::Join:
+                      - ''
+                      -
+                        - 'arn:aws:execute-api:'
+                        - Ref: AWS::Region
+                        - ':'
+                        - Ref: AWS::AccountId
+                        - ':'
+                        - Ref: ApiGatewayRestApi
+                        - '/*'
+    CognitoUserPoolDomain:
+      Type: AWS::Cognito::UserPoolDomain
+      Properties:
+        Domain: ${self:custom.userPoolDomain}
+        UserPoolId:
+          Ref: CognitoUserPool
+
+package:
+ exclude:
+   - node_modules
+ include:
+   - ./bin/**
