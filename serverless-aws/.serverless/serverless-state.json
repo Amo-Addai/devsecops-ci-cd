@@ -1130,7 +1130,7 @@
     "serviceFilename": "serverless.yml",
     "layers": {},
     "isDashboardMonitoringPreconfigured": false,
-    "artifact": "/home/jkeam/go/src/bitbucket.org/itshospitality/chatbot-api/services/.serverless/chatbot-api-service.zip"
+    "artifact": "/home/jkeam/go/src/github.com/Amo-Addai/devsecops-ci-cd/serverless-aws/.serverless/chatbot-api-service.zip"
   },
   "package": {
     "artifactDirectoryName": "serverless/chatbot-api-service/dev/1595818292267-2020-07-27T02:51:32.267Z",

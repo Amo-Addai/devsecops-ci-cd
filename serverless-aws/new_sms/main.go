@@ -4,9 +4,9 @@ import (
 	"log"
 	"net/url"
 
-	"bitbucket.org/itshospitality/chatbot-api/services/models"
-	"bitbucket.org/itshospitality/chatbot-api/services/new_sms/lib"
-	"bitbucket.org/itshospitality/chatbot-api/services/utils"
+	"github.com/Amo-Addai/devsecops-ci-cd/serverless-aws/models"
+	"github.com/Amo-Addai/devsecops-ci-cd/serverless-aws/new_sms/lib"
+	"github.com/Amo-Addai/devsecops-ci-cd/serverless-aws/utils"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 )
